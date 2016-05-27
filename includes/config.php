@@ -1,12 +1,33 @@
 <?php
 
-	mb_internal_encoding();
-	mb_http_output();
-
 	ini_set("display_errors", true);
 	error_reporting(E_ALL);
 	
-	require("helpers.php");
+	/*typeset: utf8 multiple bit*/
+	mb_internal_encoding();
+	mb_http_output();
+	
+	/*collection of commonly use functions*/
+	require "helpers.php";
+	
+	/*Evernote autoload*/
+	require '/../vendors/evernote/vendor/autoload.php';
+	
+	/*Evernote interface with settings*/
+	require "../libraries/evernote.php";
+	$sandbox = true;
+	$china   = false;
+	
+	/*api settings*/
+	$servername = 'localhost';
+	$apiKey      = 'sflam';
+	$apiSecret   = '94bc760abe415a55';
+	
+	/*MySQL interface*/
+	require "../libraries/mysql.php";
+	$sqlUsername = 'root';
+	$sqlPassword = 'siarlftsm@ICl';
+	mysql::init($servername, $sqlUsername, $sqlPassword);
 	
 	session_start();
 	
