@@ -7,6 +7,8 @@
 	mb_internal_encoding();
 	mb_http_output();
 	
+	$configFile = '../config.json';
+	
 	/*collection of commonly use functions*/
 	require "helpers.php";
 	
@@ -18,16 +20,9 @@
 	$sandbox = true;
 	$china   = false;
 	
-	/*api settings*/
-	$servername = 'localhost';
-	$apiKey      = 'sflam';
-	$apiSecret   = '94bc760abe415a55';
-	
 	/*MySQL interface*/
 	require "../libraries/mysql.php";
-	$sqlUsername = 'root';
-	$sqlPassword = 'siarlftsm@ICl';
-	mysql::init($servername, $sqlUsername, $sqlPassword);
+	mysql::init($configFile);
 	
 	session_start();
 	
