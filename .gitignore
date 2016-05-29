@@ -1,2 +1,4 @@
 test*
 before production.txt
+config.json
+phpmyadmin/
