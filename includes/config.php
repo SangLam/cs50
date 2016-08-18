@@ -7,8 +7,6 @@
 	mb_internal_encoding();
 	mb_http_output();
 	
-	$configFile = '../config.json';
-	
 	/*collection of commonly use functions*/
 	require "helpers.php";
 	
@@ -21,6 +19,7 @@
 	$china   = false;
 	
 	/*MySQL interface*/
+	$configFile = '../config.json';
 	require "../libraries/mysql.php";
 	mysql::init($configFile);
 	
