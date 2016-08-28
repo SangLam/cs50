@@ -11,7 +11,7 @@
 	require "helpers.php";
 	
 	/*Evernote autoload*/
-	require '/../vendors/evernote/vendor/autoload.php';
+	require '../vendors/evernote/vendor/autoload.php';
 	
 	/*Evernote interface with settings*/
 	require "../libraries/evernote.php";
