@@ -4,16 +4,21 @@
  * Interface to connect to database using PDO extension
  ********************************************************/
 
-class MySql
+class MySqlConnection
 {
-    private static $servername;
-    private static $name;
-    private static $username;
-    private static $password;
-    private static $handle;
+    private static $instance = null;
+    private $handle;
 
-    /* stores credential form config files into class variables */
-    public static function init($configFile)
+    public static function getInstance($configFile = null)
+    {
+        if (self::$instance === null) {
+            self::$instance = new static($configFile);
+        }
+
+        return self::$instance;
+    }
+
+    protected function __construct($configFile)
     {
         if (!is_file($configFile))
             trigger_error("Could not find {$configFile}", E_USER_ERROR);
@@ -22,44 +27,37 @@ class MySql
         if ($contents === false)
             trigger_error("Could not read {$configFile}", E_USER_ERROR);
 
-        $config = json_decode($contents, true);
+        $config = json_decode($contents, true)['database'];
         if (is_null($config))
             trigger_error("Could not decode {$configFile}", E_USER_ERROR);
 
         foreach (["servername", "name", "password", "username"] as $key)
-            if (!isset($config["database"][$key]))
+            if (!isset($config[$key]))
                 trigger_error("Missing value for database.{$key}", E_USER_ERROR);
 
-        self::$servername = $config['database']['servername'];
-        self::$name = $config['database']['name'];
-        self::$username = $config['database']['username'];
-        self::$password = $config['database']['password'];
+        $this->handle = new PDO(
+            "mysql:host=" . $config['servername'] . ";dbname=" . $config['name'],
+            $config['username'],
+            $config['password'],
+            array(PDO::MYSQL_ATTR_FOUND_ROWS => true)
+        );
+        $this->handle->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     }
 
-    /* creates database handle if not stored locally, and return it */
-    private static function getHandle()
+    private function __clone()
     {
-        if (!isset(self::$handle)) {
-            try {
-                self::$handle = new PDO(
-                    "mysql:host=" . self::$servername . ";dbname=" . self::$name,
-                    self::$username,
-                    self::$password
-                );
+    }
 
-                self::$handle->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            } catch (PDOException $e) {
-                echo "Connection failed: " . $e->getMessage();
-            }
-        }
-        return self::$handle;
+    private function __wakeup()
+    {
     }
 
     /* separates database columns into types for type sanitising and filtering.
      * queries database using statement object and returns result set or
      * number of rows affected */
-    public static Function queryUsers($sql, $args)
+    public function queryUsers($sql, $args)
     {
+        $statement = $this->handle->prepare($sql);
         $args += [
             'id' => null,
             'username' => null,
@@ -76,130 +74,144 @@ class MySql
             'projectStack' => null,
             'tags' => null
         ];
-
         $userArgTypes = [
-            'integers' =>  ['id', 'tokenExpiration'],
-            'userStrings' => ['username', 'firstname', 'lastname'],
+            'integers' =>  [
+                'id',
+                'tokenExpiration'
+            ],
+            'userStrings' => [
+                'username',
+                'firstname',
+                'lastname'
+            ],
             'hash' => ['hash'],
             'email' => ['email'],
-            'evernoteStrings' => ['token', ':ENUserId', 'taskFolderGuid', 'taskFolderName', 'projectStack'],
+            'evernoteStrings' => [
+                'token',
+                ':ENUserId',
+                'taskFolderGuid',
+                'taskFolderName',
+                'projectStack'
+            ],
             'evernoteUrl' => ['webApiUrlPrefix'],
             'tags' => ['tags']
         ];
+        $stetement = $this->bindStatementArgumentsByTypes(
+            $args,
+            $userArgTypes,
+            $statement
+        );
 
-        $statement = self::gethandle()->prepare($sql);
-        $stetement = self::bindStatementArgumentsByTypes($args, $userArgTypes, $statement);
-
-        return self::querySql($statement);
+        return $this->querySql($statement);
     }
 
     /* separates database columns into types for type sanitising and filtering.
      * queries database using statement object and returns result set or
      * number of rows affected */
-    public static function queryNotes($sql, $args)
+    public function queryNotes($sql, $args)
     {
+        $statement = $this->handle->prepare($sql);
         $args += [
-            'userId' => NULL,
-            'guid' => NULL,
-            'title' => NULL,
-            'tags' => NULL,
-            'updated' => NULL,
-            'notebookGuid' => NULL
+            'userid' => null,
+            'guid' => null,
+            'title' => null,
+            'tags' => null,
+            'updated' => null,
+            'notebookguid' => null
         ];
-
         $noteArgTypes = [
-            'integers' =>  ['userId', 'updated'],
+            'integers' =>  [
+                'userId',
+                'updated'
+            ],
             'userStrings' => ['title'],
-            'evernoteStrings' => ['guid', 'notebookGuid'],
+            'evernoteStrings' => [
+                'guid',
+                'notebookGuid'
+            ],
             'tags' => ['tags'],
         ];
+        $statement = $this->bindStatementArgumentsByTypes(
+            $args,
+            $noteArgTypes,
+            $statement
+        );
 
-        $statement = self::gethandle()->prepare($sql);
-        $statement = self::bindStatementArgumentsByTypes($args, $noteArgTypes, $statement);
-
-        return self::querySql($statement);
+        return $this->querySql($statement);
     }
 
-    public static function queryNoteContent($sql, $args)
+    public function queryNoteContent($sql, $args)
     {
+        $statement = $this->handle->prepare($sql);
         $args += [
-            'guid' => NULL,
-            'updated' => NULL,
-            'content' => NULL
+            'guid' => null,
+            'updated' => null,
+            'content' => null
         ];
-
         $noteArgTypes = [
             'integers' =>  ['updated'],
             'ENML' => ['content'],
             'evernoteStrings' => ['guid']
         ];
+        $statement = $this->bindStatementArgumentsByTypes(
+            $args,
+            $noteArgTypes,
+            $statement
+        );
 
-        $statement = self::gethandle()->prepare($sql);
-        $statement = self::bindStatementArgumentsByTypes($args, $noteArgTypes, $statement);
-
-        return self::querySql($statement);
+        return $this->querySql($statement);
     }
 
     /* bind argument to parameter in statement based on types */
-    private static function bindStatementArgumentsByTypes($args, $types, $statement)
+    private function bindStatementArgumentsByTypes($args, $types, $statement)
     {
         foreach (array_keys($types) as $type) {
             switch ($type) {
             case 'integers':
-                self::bindIntegers($args, $types[$type], $statement);
+                $this->bindIntegers($args, $types[$type], $statement);
                 break;
             case 'ENML':
-                self::bindENML($args, $types[$type], $statement);
+                $this->bindENML($args, $types[$type], $statement);
                 break;
             case 'userStrings':
-                self::bindUserStrings($args, $types[$type], $statement);
+                $this->bindUserStrings($args, $types[$type], $statement);
                 break;
             case 'hash':
-                self::bindHash($args, $types[$type], $statement);
+                $this->bindHash($args, $types[$type], $statement);
                 break;
             case 'email':
-                self::bindEmail($args, $types[$type], $statement);
+                $this->bindEmail($args, $types[$type], $statement);
                 break;
             case 'evernoteStrings':
-                self::bindEvernoteStrings($args, $types[$type], $statement);
+                $this->bindEvernoteStrings($args, $types[$type], $statement);
                 break;
             case 'evernoteUrl':
-                self::bindEvernoteUrl($args, $types[$type], $statement);
+                $this->bindEvernoteUrl($args, $types[$type], $statement);
                 break;
             case 'tags':
-                self::bindTags($args, $types[$type], $statement);
+                $this->bindTags($args, $types[$type], $statement);
                 break;
             };
         }
+
         return $statement;
     }
 
     /* attempt to execute the statement, returning appropriate result */
-    private static function querySql($statement)
+    private function querySql($statement)
     {
-        /* print $statement->debugDumpParams(); */
-        try {
-            $statement->execute();
-        }
-        catch (PDOException $e) {
-            var_dump( $e->getMessage());
-        }
+        $statement->execute();
 
-        if ($statement->columnCount() > 0)
-        {
-            // return result set's rows
+        if ($statement->columnCount() > 0) {
+            // return result set's rows for SELECT query
             return $statement->fetchAll(PDO::FETCH_ASSOC);
-        }
-
-        // if query was DELETE, INSERT, or UPDATE
-        else
-        {
-            // return number of rows affected
+        } else {
+            // return number of rows affected for DELETE, INSERT, UPDATE queries
             return $statement->rowCount();
         }
     }
 
-    private static function bindIntegers($args, $keys, &$statement)
+    private function bindIntegers($args, $keys, &$statement)
     {
         foreach ($keys as $key) {
             if (isset($args[$key])) {
@@ -209,7 +221,7 @@ class MySql
         }
     }
 
-    private static function bindENML($args, $keys, &$statement)
+    private function bindENML($args, $keys, &$statement)
     {
         foreach ($keys as $key) {
             if (isset($args[$key])) {
@@ -217,10 +229,9 @@ class MySql
                 $statement->bindValue(':' . $key, $var, PDO::PARAM_STR);
             }
         }
-
     }
 
-    private static function bindUserStrings($args, $keys, &$statement)
+    private function bindUserStrings($args, $keys, &$statement)
     {
         foreach ($keys as $key) {
             if (isset($args[$key])) {
@@ -228,10 +239,9 @@ class MySql
                 $statement->bindValue(':' . $key, $var, PDO::PARAM_STR);
             }
         }
-
     }
 
-    private static function bindHash($args, $keys, &$statement)
+    private function bindHash($args, $keys, &$statement)
     {
         foreach ($keys as $key) {
             if (isset($args[$key])) {
@@ -240,7 +250,7 @@ class MySql
         }
     }
 
-    private static function bindEmail($args, $keys, &$statement)
+    private function bindEmail($args, $keys, &$statement)
     {
         foreach ($keys as $key) {
             if (isset($args[$key])) {
@@ -250,7 +260,7 @@ class MySql
         }
     }
 
-    private static function bindEvernoteStrings($args, $keys, &$statement)
+    private function bindEvernoteStrings($args, $keys, &$statement)
     {
         foreach ($keys as $key) {
             if (isset($args[$key])) {
@@ -260,7 +270,7 @@ class MySql
         }
     }
 
-    private static function bindEvernoteUrl ($args, $keys, &$statement)
+    private function bindEvernoteUrl ($args, $keys, &$statement)
     {
         foreach ($keys as $key) {
             if (isset($args[$key])) {
@@ -270,7 +280,7 @@ class MySql
         }
     }
 
-    private static function bindTags($args, $keys, &$statement)
+    private function bindTags($args, $keys, &$statement)
     {
         foreach ($keys as $key) {
             if (isset($args[$key])) {
