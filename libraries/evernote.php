@@ -1,7 +1,53 @@
 <?php
+/* require 'vendors/evernote/vendor/autoload.php'; */
+require_once 'vendor/autoload.php';
 /*hold the class interface for interacting with evernote*/
+class EvernoteInterface
+{
+    private $database;
+    private $client;
+    private $noteStore;
+    private $token;
 
-class Evernote
+    public function __construct(\Evernote\Client $client, MySqlInterface $database)
+    {
+        $this->database = $database;
+        $this->client = $client;
+        $this->token = $client->getToken();
+        
+    }
+
+    public function retrieveTagList()
+    {
+        $tags = $this->getNoteStore()->listTags($this->token);
+        $formattedTags = $this->formatTags($tags);
+        $this->database->storeTags($formattedTags);
+
+        return $formattedTags;
+    }
+
+    /* not obtained in construction to allow for mocking */
+    private function getNoteStore()
+    {
+        if (!isset($this->noteStore)) {
+            $this->noteStore = $this->client->getUserNoteStore();
+        }
+
+        return $this->noteStore;
+    }
+
+    private function formatTags($tags)
+    {
+        $formattedTags = array();
+        foreach ($tags as $tag) {
+            $formattedTags[$tag->guid] = $tag->name;
+        }
+
+        return $formattedTags;
+    }
+
+}
+class EvernoteOld
 {
     private static $token;
     private static $sandbox;
@@ -15,6 +61,74 @@ class Evernote
         self::$token = $token;
         self::$sandbox = $sandbox;
         self::$china = $china;
+    }
+
+    public static function getAllTaskNotes()
+    {
+        $values = [
+            'notebookGuid' => self::getTaskNotebookGuid()
+        ];
+        $filter = new \EDAM\NoteStore\NoteFilter($values);
+        $notes = self::getEvernoteTaskNotes($filter);
+
+        return $notes;
+    }
+
+    public static function getTaskNotesWithTerm($term)
+    {
+        $values = [
+            'notebookGuid' => self::getTaskNotebookGuid(),
+            'words' => $term
+        ];
+        $filter = new \EDAM\NoteStore\NoteFilter($values);
+        $notes = self::getEvernoteTaskNotes($filter);
+
+        return $notes;
+    }
+
+    public static function getTaskNotesWithTag($tags)
+    {
+        $values = [
+            'notebookGuid' => self::getTaskNotebookGuid(),
+            'tagGuids' => $tags
+        ];
+        $filter = new \EDAM\NoteStore\NoteFilter($values);
+        $notes = self::getEvernoteTaskNotes($filter);
+
+        return $notes;
+    }
+
+    public static function getTaskNoteContent($guid)
+    {
+        $args = [
+            'guid' => $guid,
+        ];
+        $query = 'SELECT updated FROM notecontent WHERE guid=:guid';
+        $result = mysql::queryNoteContent($query, $args);
+
+        if (!$result) {
+            $content = self::getNewTaskNoteContent($guid);
+        } else {
+            if ($result[0]['updated']) {
+                $content = self::updateNewTaskNoteContent($guid);
+            } else {
+                $query = 'SELECT content FROM notecontent WHERE guid=:guid';
+                $content = mysql::queryNoteContent($query, $args)[0]['content'];
+            }
+        }
+
+        return $content;
+    }
+
+    /* returns a list of {key, value}={guid,titles} of the notes (metadata) */
+    public static function getTitle($notes)
+    {
+        $titles = array();
+        foreach ($notes as $note) {
+            $titles[$note['guid']] = $note['title'];
+        }
+
+        return $titles;
     }
 
     private static function getClient()
@@ -49,28 +163,6 @@ class Evernote
         return self::$tagList;
     }
 
-    public static function updateEvernoteTagList()
-    {
-        $formattedTags = array();
-        $tags = self::getNoteStore()->listTags();
-        foreach ($tags as $tag) {
-            $formattedTags[$tag->guid] = $tag->name;
-        }
-        self::$tagList = $formattedTags;
-
-        $args = [
-            'id' => $_SESSION['id'],
-            'tags' => json_encode($formattedTags)
-        ];
-        $query = 'UPDATE users SET tags=:tags WHERE id=:id';
-        mysql::queryUsers($query, $args);
-
-        return $formattedTags;
-    }
-
-    /* gets new tag information from evernote, formats to working tag array,
-        * appends to local and db taglist appropiately and returns formatted tag
-        * as an array */
     private static function getEvernoteNewTag($tagGuid)
     {
         $newTag = self::getNotestore()->getTag($tagGuid);
@@ -87,6 +179,9 @@ class Evernote
         return $newTag;
     }
 
+    /* gets new tag information from evernote, formats to working tag array,
+     * appends to local and db taglist appropiately and returns formatted tag
+     * as an array */
     /* TODO: take argument to choose notebook */
     private static function getTaskNotebookGuid()
     {
@@ -199,28 +294,6 @@ class Evernote
         return json_encode($formattedTags);
     }
 
-    public static function getTaskNoteContent($guid)
-    {
-        $args = [
-            'guid' => $guid,
-        ];
-        $query = 'SELECT updated FROM notecontent WHERE guid=:guid';
-        $result = mysql::queryNoteContent($query, $args);
-
-        if (!$result) {
-            $content = self::getNewTaskNoteContent($guid);
-        } else {
-            if ($result[0]['updated']) {
-                $content = self::updateNewTaskNoteContent($guid);
-            } else {
-                $query = 'SELECT content FROM notecontent WHERE guid=:guid';
-                $content = mysql::queryNoteContent($query, $args)[0]['content'];
-            }
-        }
-
-        return $content;
-    }
-
     private static function getNewTaskNoteContent($guid)
     {
         $content = self::getEvernoteTaskNoteContent($guid);
@@ -249,6 +322,7 @@ class Evernote
         return $content;
     }
 
+    /* TODO: format different filetypes */
     private static function getEvernoteTaskNoteContent($guid)
     {
         $content = self::getNoteStore()->getNoteContent($guid);
@@ -263,7 +337,6 @@ class Evernote
         return $content;
     }
 
-        /* TODO: format different filetypes */
     private static function formatTaskNoteContent($guid, $hashes, $content)
     {
         /* TODO: use webapiurlprefix saved from oauth method */
@@ -286,56 +359,29 @@ class Evernote
         return $content;
     }
 
-    /* returns a list of {key, value}={guid,titles} of the notes (metadata) */
-    public static function getTitle($notes)
+/*********************************************************
+ *
+ * Methods implemented in EvernoteInterface
+ *
+ ********************************************************/
+    public static function updateEvernoteTagList()
     {
-        $titles = array();
-        foreach ($notes as $note) {
-            $titles[$note['guid']] = $note['title'];
+        $formattedTags = array();
+        $tags = self::getNoteStore()->listTags();
+        foreach ($tags as $tag) {
+            $formattedTags[$tag->guid] = $tag->name;
         }
+        self::$tagList = $formattedTags;
 
-        return $titles;
-    }
-
-    public static function getAllTaskNotes()
-    {
-        $values = [
-            'notebookGuid' => self::getTaskNotebookGuid()
+        $args = [
+            'id' => $_SESSION['id'],
+            'tags' => json_encode($formattedTags)
         ];
-        $filter = new \EDAM\NoteStore\NoteFilter($values);
-        $notes = self::getEvernoteTaskNotes($filter);
+        $query = 'UPDATE users SET tags=:tags WHERE id=:id';
+        mysql::queryUsers($query, $args);
 
-        return $notes;
+        return $formattedTags;
     }
 
-    public static function getTaskNotesWithTerm($term)
-    {
-        $values = [
-            'notebookGuid' => self::getTaskNotebookGuid(),
-            'words' => $term
-        ];
-        $filter = new \EDAM\NoteStore\NoteFilter($values);
-        $notes = self::getEvernoteTaskNotes($filter);
-
-        return $notes;
-    }
-
-    public static function getTaskNotesWithTag($tags)
-    {
-        $values = [
-            'notebookGuid' => self::getTaskNotebookGuid(),
-            'tagGuids' => $tags
-        ];
-        $filter = new \EDAM\NoteStore\NoteFilter($values);
-        $notes = self::getEvernoteTaskNotes($filter);
-
-        return $notes;
-    }
-
-    /*********************************************************
-     *
-     * Helper functions for developemnt
-     *
-     ********************************************************/
 }
 ?>
