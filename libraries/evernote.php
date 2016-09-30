@@ -8,6 +8,7 @@ class EvernoteInterface
     private $client;
     private $noteStore;
     private $token;
+    private $tagList;
 
     public function __construct(\Evernote\Client $client, MySqlInterface $database)
     {
@@ -19,11 +20,54 @@ class EvernoteInterface
 
     public function retrieveTagList()
     {
-        $tags = $this->getNoteStore()->listTags($this->token);
-        $formattedTags = $this->formatTags($tags);
-        $this->database->storeTags($formattedTags);
+        $tagList = $this->getNoteStore()->listTags($this->token);
+        $formattedTagList = $this->formatTagList($tagList);
+        $this->tagList = $formattedTagList;
 
-        return $formattedTags;
+        $this->database->storeTags($formattedTagList);
+        return $this->tagList;
+    }
+
+    public function retrieveTaskNotes($filter)
+    {
+        $values = [
+            'includeTitle' => true,
+            'includeUpdated' => true,
+            'includeTagGuids' => true,
+            'includeNotebookGuid' => true
+        ];
+        $notesMetadataResultSpec = new \EDAM\NoteStore\NotesMetadataResultSpec($values);
+        $noteMetadata = self::getNoteStore()->findNotesMetadata(
+            $this->token,
+            $filter,
+            $offset = 0,
+            $maxResult = 20,
+            $notesMetadataResultSpec
+        );
+        $formattedNotes = $this->formatNotes($noteMetadata->notes);
+
+        foreach ($formattedNotes as $note) {
+            switch ($this->database->noteStatus($note)) {
+            case 'new':
+                $this->database->storeNote($note);
+                $this->retrieveNoteContent($note['guid']);
+                break;
+            case 'updated':
+                $this->database->updateNote($note);
+                $this->database->markUpdatedContent($note);
+                break;
+            }
+        };
+        return $formattedNotes;
+    }
+
+    public function retrieveNoteContent($guid)
+    {
+        $content = $this->getNoteStore()->getNoteContent($this->token, $guid);
+        $formattedContent = $this->formatNoteContent($guid, $content);
+
+        $this->database->storeNoteContent($guid, $formattedContent);
+        return $formattedContent;
     }
 
     /* not obtained in construction to allow for mocking */
@@ -36,16 +80,113 @@ class EvernoteInterface
         return $this->noteStore;
     }
 
-    private function formatTags($tags)
+    private function getTagList()
     {
-        $formattedTags = array();
+        if (!isset($this->tagList)) {
+            $this->tagList = $this->retrieveTagList();
+        }
+
+        return $this->tagList;
+
+    }
+
+    private function retrieveNewTag($tagGuid)
+    {
+        $newTag = $this->getNoteStore()->getTag($this->token, $tagGuid);
+        $formattedTag = $this->formatTag($newTag);
+        $this->tagList = array_merge($this->tagList, $formattedTag);
+
+        return $formattedTag;
+    }
+
+    private function formatTag($tag)
+    {
+        $formattedTag[$tag->guid] = $tag->name;
+        return $formattedTag;
+    }
+
+    private function formatTagList($tags)
+    {
+        $formattedTagList = array();
         foreach ($tags as $tag) {
-            $formattedTags[$tag->guid] = $tag->name;
+            $formattedTagList = array_merge(
+                $formattedTagList,
+                $this->formatTag($tag)
+            );
+        }
+
+        return $formattedTagList;
+    }
+
+    private function formatTagGuids($tagGuids)
+    {    
+        $formattedTags = array();
+        $tagList = $this->getTagList();
+        foreach ($tagGuids as $tagGuid) {
+            if (isset($tagList[$tagGuid])) {
+                $formattedTags[$tagGuid] = $tagList[$tagGuid];
+            } else {
+                $newTag = $this->retrieveNewTag($tagGuid);
+                $formattedTags = array_merge($formattedTags, $newTag);
+            }
         }
 
         return $formattedTags;
     }
 
+    private function formatNotes($notes)
+    {
+        foreach ($notes as &$note) {
+            $note = (array) $note;
+            /* time is accurate only to seconds but given in milliseconds */
+            $note['updated'] = $note['updated'] * 0.001;
+            if ($note['tagGuids']) {
+                $note['tags'] = $this->formatTagGuids($note['tagGuids']);
+            } else {
+                $note['tags'] = '';
+            }
+            unset(
+                $note['contentLength'],
+                $note['created'],
+                $note['deleted'],
+                $note['updateSequenceNum'],
+                $note['tagGuids'],
+                $note['attributes'],
+                $note['largestResourceMime'],
+                $note['largestResourceSize']
+            );
+        }
+
+        return $notes;
+    }
+
+    private function formatNoteContent($guid, $content)
+    {
+        /* format content if hash appears in string*/
+        $hashes = array();
+        $pattern = '/\bhash="([0-9a-fA-F]*)" /';
+        if (preg_match_all($pattern, $content, $hashes, PREG_SET_ORDER) > 0) {
+            /* TODO: use webapiurlprefix saved from oauth method */
+            $userInfo = $this->client->getAdvancedClient()->getUserStore()->getPublicUserInfo('batt76');
+            foreach ($hashes as $hash) {
+                $resource = $this->getNoteStore()->getResourceByHash(
+                    $this->token,
+                    $guid,
+                    hex2bin($hash[1]),
+                    $withData = false,
+                    $withRecognition = false,
+                    $withAlternateData = false
+                );
+                $pattern = "/<en-media\s[^>]*$hash[0][^>]*\/>/" ;
+                $resGuid = $resource->guid;
+                $resUrl = $userInfo->webApiUrlPrefix . 'res/' . $resGuid;
+                $replacement = "<img src=$resUrl />";
+                $content = preg_replace($pattern, $replacement, $content);
+            }
+        }
+        
+        return $content;
+    }
 }
 class EvernoteOld
 {
@@ -56,11 +197,24 @@ class EvernoteOld
     private static $notestore;
     private static $tagList;
 
-    public static function init($token, $sandbox, $china = false)
+    /* gets new tag information from evernote, formats to working tag array,
+     * appends to local and db taglist appropiately and returns formatted tag
+     * as an array */
+    /* TODO: take argument to choose notebook */
+    private static function getTaskNotebookGuid()
     {
-        self::$token = $token;
-        self::$sandbox = $sandbox;
-        self::$china = $china;
+        return 'b7fc2f7e-cd1d-46b1-8755-5062af555b71';
+    }
+
+    /* returns a list of {key, value}={guid,titles} of the notes (metadata) */
+    public static function getTitle($notes)
+    {
+        $titles = array();
+        foreach ($notes as $note) {
+            $titles[$note['guid']] = $note['title'];
+        }
+
+        return $titles;
     }
 
     public static function getAllTaskNotes()
@@ -120,72 +274,50 @@ class EvernoteOld
         return $content;
     }
 
-    /* returns a list of {key, value}={guid,titles} of the notes (metadata) */
-    public static function getTitle($notes)
+/*********************************************************
+ *
+ * Methods implemented in EvernoteInterface
+ *
+ ********************************************************/
+    public static function init($token, $sandbox, $china = false)
     {
-        $titles = array();
-        foreach ($notes as $note) {
-            $titles[$note['guid']] = $note['title'];
-        }
-
-        return $titles;
+        self::$token = $token;
+        self::$sandbox = $sandbox;
+        self::$china = $china;
     }
 
-    private static function getClient()
+    public static function updateEvernoteTagList()
     {
-        if (!isset(self::$client)) {
-            self::$client = new \Evernote\Client(self::$token, self::$sandbox, null, null, self::$china);
+        $formattedTags = array();
+        $tags = self::getNoteStore()->listTags();
+        foreach ($tags as $tag) {
+            $formattedTags[$tag->guid] = $tag->name;
         }
-
-        return self::$client;
-    }
-
-    private static function getNoteStore()
-    {
-        if (!isset(self::$notestore)) {
-            self::$notestore = self::getClient()->getUserNoteStore();
-        }
-
-        return self::$notestore;
-    }
-
-    private static function getTagList()
-    {
-        if (!isset(self::$tagList)) {
-            $args = [
-                'id' => $_SESSION['id']
-            ];
-            $query = 'SELECT tags FROM users WHERE id=:id';
-            $results = mysql::queryUsers($query, $args);
-            self::$tagList = json_decode($results[0]['tags'], $asArray = true);
-        }
-
-        return self::$tagList;
-    }
-
-    private static function getEvernoteNewTag($tagGuid)
-    {
-        $newTag = self::getNotestore()->getTag($tagGuid);
-        $newTag = [$tagGuid => $newTag->name];
-        self::$tagList = array_merge(self::$tagList, $newTag);
+        self::$tagList = $formattedTags;
 
         $args = [
             'id' => $_SESSION['id'],
-            'tags' => json_encode($newTag)
+            'tags' => json_encode($formattedTags)
         ];
-        $query = 'UPDATE users SET tags=JSON_MERGE(tags, :tags) WHERE id=:id';
+        $query = 'UPDATE users SET tags=:tags WHERE id=:id';
         mysql::queryUsers($query, $args);
 
-        return $newTag;
+        return $formattedTags;
     }
 
-    /* gets new tag information from evernote, formats to working tag array,
-     * appends to local and db taglist appropiately and returns formatted tag
-     * as an array */
-    /* TODO: take argument to choose notebook */
-    private static function getTaskNotebookGuid()
+    /* TODO: format different filetypes */
+    private static function getEvernoteTaskNoteContent($guid)
     {
-        return 'b7fc2f7e-cd1d-46b1-8755-5062af555b71';
+        $content = self::getNoteStore()->getNoteContent($guid);
+
+        /* format content if hash appears in string*/
+        $hashes = array();
+        $pattern = '/\bhash="([0-9a-fA-F]*)" /';
+        if (preg_match_all($pattern, $content, $hashes, PREG_SET_ORDER) > 0) {
+            $content = self::formatTaskNoteContent($guid, $hashes, $content);
+        }
+
+        return $content;
     }
 
     /* uses evernote task filter to filter retrieved notes (metadata) */
@@ -244,6 +376,15 @@ class EvernoteOld
         return $notes->notes;
     }
 
+    private static function getClient()
+    {
+        if (!isset(self::$client)) {
+            self::$client = new \Evernote\Client(self::$token, self::$sandbox, null, null, self::$china);
+        }
+
+        return self::$client;
+    }
+
     private static function markNewNoteContent($note)
     {
         $args = [
@@ -254,6 +395,22 @@ class EvernoteOld
         $result = mysql::queryNoteContent($query, $args);
 
         return $result;
+    }
+
+    private static function formatTagGuidList($tagGuids)
+    {
+        $formattedTags = array();
+        $tagList = self::getTagList();
+        foreach ($tagGuids as $tagGuid) {
+            if (isset($tagList[$tagGuid])) {
+                $formattedTags[$tagGuid] = $tagList[$tagGuid];
+            } else {
+                $newTag = self::getEvernoteNewTag($tagGuid);
+                $formattedTags = array_merge($formattedTags, $newTag);
+            }
+        }
+
+        return json_encode($formattedTags);
     }
 
     private static function status($note)
@@ -278,20 +435,43 @@ class EvernoteOld
         }
     }
 
-    private static function formatTagGuidList($tagGuids)
+    private static function getTagList()
     {
-        $formattedTags = array();
-        $tagList = self::getTagList();
-        foreach ($tagGuids as $tagGuid) {
-            if (isset($tagList[$tagGuid])) {
-                $formattedTags[$tagGuid] = $tagList[$tagGuid];
-            } else {
-                $newTag = self::getEvernoteNewTag($tagGuid);
-                $formattedTags = array_merge($formattedTags, $newTag);
-            }
+        if (!isset(self::$tagList)) {
+            $args = [
+                'id' => $_SESSION['id']
+            ];
+            $query = 'SELECT tags FROM users WHERE id=:id';
+            $results = mysql::queryUsers($query, $args);
+            self::$tagList = json_decode($results[0]['tags'], $asArray = true);
         }
 
-        return json_encode($formattedTags);
+        return self::$tagList;
+    }
+
+    private static function getNoteStore()
+    {
+        if (!isset(self::$notestore)) {
+            self::$notestore = self::getClient()->getUserNoteStore();
+        }
+
+        return self::$notestore;
+    }
+
+    private static function getEvernoteNewTag($tagGuid)
+    {
+        $newTag = self::getNotestore()->getTag($tagGuid);
+        $newTag = [$tagGuid => $newTag->name];
+        self::$tagList = array_merge(self::$tagList, $newTag);
+
+        $args = [
+            'id' => $_SESSION['id'],
+            'tags' => json_encode($newTag)
+        ];
+        $query = 'UPDATE users SET tags=JSON_MERGE(tags, :tags) WHERE id=:id';
+        mysql::queryUsers($query, $args);
+
+        return $newTag;
     }
 
     private static function getNewTaskNoteContent($guid)
@@ -322,21 +502,6 @@ class EvernoteOld
         return $content;
     }
 
-    /* TODO: format different filetypes */
-    private static function getEvernoteTaskNoteContent($guid)
-    {
-        $content = self::getNoteStore()->getNoteContent($guid);
-
-        /* format content if hash appears in string*/
-        $hashes = array();
-        $pattern = '/\bhash="([0-9a-fA-F]*)" /';
-        if (preg_match_all($pattern, $content, $hashes, PREG_SET_ORDER) > 0) {
-            $content = self::formatTaskNoteContent($guid, $hashes, $content);
-        }
-
-        return $content;
-    }
-
     private static function formatTaskNoteContent($guid, $hashes, $content)
     {
         /* TODO: use webapiurlprefix saved from oauth method */
@@ -357,30 +522,6 @@ class EvernoteOld
         }
 
         return $content;
-    }
-
-/*********************************************************
- *
- * Methods implemented in EvernoteInterface
- *
- ********************************************************/
-    public static function updateEvernoteTagList()
-    {
-        $formattedTags = array();
-        $tags = self::getNoteStore()->listTags();
-        foreach ($tags as $tag) {
-            $formattedTags[$tag->guid] = $tag->name;
-        }
-        self::$tagList = $formattedTags;
-
-        $args = [
-            'id' => $_SESSION['id'],
-            'tags' => json_encode($formattedTags)
-        ];
-        $query = 'UPDATE users SET tags=:tags WHERE id=:id';
-        mysql::queryUsers($query, $args);
-
-        return $formattedTags;
     }
 
 }

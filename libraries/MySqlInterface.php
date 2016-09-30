@@ -23,4 +23,82 @@ class MySqlInterface
 
         return $this->connection->queryUsers($query, $args);
     }
+
+    public function storeNote($note)
+    {
+        $args = array_merge(['userId' => $this->id], $note);
+        $query = 'INSERT INTO notes (userId, guid, title, tags, updated, notebookGuid) VALUES (:userId, :guid, :title, :tags, :updated, :notebookGuid)';
+
+        return $this->connection->queryNotes($query, $args);
+    }
+
+    public function updateNote($note)
+    {
+        $query = 'UPDATE notes SET title=:title, tags=:tags, updated=:updated, notebookGuid=:notebookGuid WHERE guid=:guid';
+
+        return $this->connection->queryNotes($query, $note);
+    }
+
+    public function storeNoteContent($guid, $content)
+    {
+        $args = [
+            'guid' => $guid,
+            'updated' => 0,
+            'content' => $content
+        ];
+        $query = 'UPDATE notecontent SET content=:content, updated=:updated WHERE guid=:guid';
+
+        $result = $this->connection->queryNoteContent($query, $args);
+        if ($result == 0) {
+            $query = 'INSERT INTO notecontent (guid, updated, content) VALUES (:guid, :updated, :content)';
+            return $this->connection->queryNoteContent($query, $args);
+        } else {
+            return $result;
+        }
+    }
+
+    public function noteStatus($note)
+    {
+        $args = [
+            'guid' => $note['guid']
+        ];
+        $query = 'SELECT updated, tags FROM notes WHERE guid=:guid';
+        $results = $this->connection->queryNotes($query, $args);
+
+        if (!$results) {
+            return 'new';
+        } else {
+            return $this->noteUpdated($note, $results) ? 'updated' : 'unchanged';
+        }
+    }
+
+    public function markUpdatedContent($note)
+    {
+        $args = [
+            'guid' => $note['guid'],
+            'updated' => 1
+        ];
+        $query = 'UPDATE notecontent SET updated=:updated WHERE guid=:guid';
+
+        return $this->connection->queryNoteContent($query, $args);
+    }
+
+    private function noteUpdated($ENNote, $DBNote)
+    {
+        return $this->contentUpdated($ENNote, $DBNote) || $this->tagUpdated($ENNote, $DBNote);
+    }
+
+    private function contentUpdated($ENNote, $DBNote)
+    {
+        return $ENNote['updated'] != $DBNote[0]['updated'];
+    }
+
+    private function tagUpdated($ENNote, $DBNote)
+    {
+        $DBTags = json_decode($DBNote[0]['tags']);
+        $ENTags = $ENNote['tags'];
+
+        return $ENTags != $DBTags;
+    }
+
 }
