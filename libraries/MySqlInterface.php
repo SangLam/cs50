@@ -26,6 +26,7 @@ class MySqlInterface
 
     public function storeNote($note)
     {
+        $note['tags'] = json_encode($note['tags']);
         $args = array_merge(['userId' => $this->id], $note);
         $query = 'INSERT INTO notes (userId, guid, title, tags, updated, notebookGuid) VALUES (:userId, :guid, :title, :tags, :updated, :notebookGuid)';
 
@@ -34,6 +35,7 @@ class MySqlInterface
 
     public function updateNote($note)
     {
+        $note['tags'] = json_encode($note['tags']);
         $query = 'UPDATE notes SET title=:title, tags=:tags, updated=:updated, notebookGuid=:notebookGuid WHERE guid=:guid';
 
         return $this->connection->queryNotes($query, $note);
@@ -59,9 +61,7 @@ class MySqlInterface
 
     public function noteStatus($note)
     {
-        $args = [
-            'guid' => $note['guid']
-        ];
+        $args = ['guid' => $note['guid']];
         $query = 'SELECT updated, tags FROM notes WHERE guid=:guid';
         $results = $this->connection->queryNotes($query, $args);
 
