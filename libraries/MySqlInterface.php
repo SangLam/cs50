@@ -83,6 +83,33 @@ class MySqlInterface
         return $this->connection->queryNoteContent($query, $args);
     }
 
+    public function retrieveTaskNotebookGuid()
+    {
+        $args = ['id' => $this->id];
+        $query = 'SELECT taskNotebookGuid FROM users WHERE id=:id';
+
+        $results = $this->connection->queryUsers($query, $args);
+        return $results[0]['taskNotebookGuid'];
+    }
+
+    public function retrieveNoteContent($guid)
+    {
+        $args = ['guid' => $guid];
+        $query = 'SELECT content FROM notecontent WHERE guid=:guid';
+
+        $result = $this->connection->queryNoteContent($query, $args);
+        return $result[0]['content'];
+    }
+
+    public function contentStatus($guid)
+    {
+        $args = ['guid' => $guid];
+        $query = 'SELECT updated FROM users WHERE guid=:guid';
+
+        $results = $this->connection->queryNoteContent($query, $args);
+        return $results;
+    }
+
     private function noteUpdated($ENNote, $DBNote)
     {
         return $this->contentUpdated($ENNote, $DBNote) || $this->tagUpdated($ENNote, $DBNote);
