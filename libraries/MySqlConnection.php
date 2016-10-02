@@ -69,8 +69,8 @@ class MySqlConnection
             'tokenExpiration' => null,
             'ENUserId' => null,
             'webApiUrlPrefix' => null,
-            'taskFolderGuid' => null,
-            'taskFolderName' => null,
+            'taskNotebookGuid' => null,
+            'taskNotebookName' => null,
             'projectStack' => null,
             'tags' => null
         ];
@@ -89,8 +89,8 @@ class MySqlConnection
             'evernoteStrings' => [
                 'token',
                 ':ENUserId',
-                'taskFolderGuid',
-                'taskFolderName',
+                'taskNotebookGuid',
+                'taskNotebookName',
                 'projectStack'
             ],
             'evernoteUrl' => ['webApiUrlPrefix'],
