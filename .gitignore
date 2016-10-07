@@ -1,4 +1,8 @@
 test*
+php*
+*.sw*
 before production.txt
 config.json
 phpmyadmin/
+Session.vim
+*~
