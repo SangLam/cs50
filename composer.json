@@ -1,0 +1,11 @@
+{
+    "require": {
+        "evernote/evernote-cloud-sdk-php": "dev-master"
+    },
+    "autoload": {
+        "classmap": [
+            "libraries"
+       ],
+       "files": ["includes/helpers.php"]
+    }
+}
