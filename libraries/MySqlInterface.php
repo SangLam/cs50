@@ -104,7 +104,7 @@ class MySqlInterface
     public function contentStatus($guid)
     {
         $args = ['guid' => $guid];
-        $query = 'SELECT updated FROM users WHERE guid=:guid';
+        $query = 'SELECT updated FROM notecontent WHERE guid=:guid';
 
         $results = $this->connection->queryNoteContent($query, $args);
         return $results;
