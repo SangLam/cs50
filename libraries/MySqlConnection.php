@@ -158,6 +158,7 @@ class MySqlConnection
             $noteArgTypes,
             $statement
         );
+        $statement->debugDumpParams();
 
         return $this->querySql($statement);
     }
@@ -165,31 +166,31 @@ class MySqlConnection
     /* bind argument to parameter in statement based on types */
     private function bindStatementArgumentsByTypes($args, $types, $statement)
     {
-        foreach (array_keys($types) as $type) {
+        foreach ($types as $type => $typeIdentifiers) {
             switch ($type) {
             case 'integers':
-                $this->bindIntegers($args, $types[$type], $statement);
+                $this->bindIntegers($args, $typeIdentifiers, $statement);
                 break;
             case 'ENML':
-                $this->bindENML($args, $types[$type], $statement);
+                $this->bindENML($args, $typeIdentifiers, $statement);
                 break;
             case 'userStrings':
-                $this->bindUserStrings($args, $types[$type], $statement);
+                $this->bindUserStrings($args, $typeIdentifiers, $statement);
                 break;
             case 'hash':
-                $this->bindHash($args, $types[$type], $statement);
+                $this->bindHash($args, $typeIdentifiers, $statement);
                 break;
             case 'email':
-                $this->bindEmail($args, $types[$type], $statement);
+                $this->bindEmail($args, $typeIdentifiers, $statement);
                 break;
             case 'evernoteStrings':
-                $this->bindEvernoteStrings($args, $types[$type], $statement);
+                $this->bindEvernoteStrings($args, $typeIdentifiers, $statement);
                 break;
             case 'evernoteUrl':
-                $this->bindEvernoteUrl($args, $types[$type], $statement);
+                $this->bindEvernoteUrl($args, $typeIdentifiers, $statement);
                 break;
             case 'tags':
-                $this->bindTags($args, $types[$type], $statement);
+                $this->bindTags($args, $typeIdentifiers, $statement);
                 break;
             };
         }
