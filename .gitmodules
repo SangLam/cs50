@@ -1,3 +1,0 @@
-[submodule "vendors/evernote"]
-	path = vendors/evernote
-	url = https://github.com/kingfui/evernote-cloud-sdk-php.git

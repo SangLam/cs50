@@ -1,10 +1,16 @@
 {
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/SangLam/evernote-cloud-sdk-php"
+        }
+    ],
     "require": {
-        "evernote/evernote-cloud-sdk-php": "dev-master"
+	"evernote/evernote-cloud-sdk-php": "dev-SSL-bypass"
     },
     "autoload": {
-        "classmap": [
-            "libraries"
+	"classmap": [
+	    "src"
        ],
        "files": ["includes/helpers.php"]
     }
