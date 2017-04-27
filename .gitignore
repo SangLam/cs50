@@ -1,7 +1,7 @@
+robin_nixon/
+public/node_modules/
 vendor/
-test*
 php*
-*.sw*
 before production.txt
 config.json
 phpmyadmin/
